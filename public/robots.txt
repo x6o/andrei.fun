@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Host
+Host: https://andrei.fun/
+
+# Sitemaps
+Sitemap: https://andrei.fun/sitemap.xml
