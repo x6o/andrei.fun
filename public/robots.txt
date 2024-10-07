@@ -6,3 +6,4 @@ Host: https://andrei.fun/
 
 # Sitemaps
 Sitemap: https://andrei.fun/sitemap.xml
+Sitemap: https://andrei.fun/sitemap.txt
