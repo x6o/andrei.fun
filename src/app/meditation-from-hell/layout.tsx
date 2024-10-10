@@ -14,6 +14,7 @@ export default function RootLayout({
     <html lang="en">
       <body
         className="antialiased"
+        style={{backgroundColor: "red"}}
       >
         {children}
       </body>
