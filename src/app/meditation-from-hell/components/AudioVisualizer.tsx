@@ -30,7 +30,6 @@ export const AudioVisualizer = ({ audio }: { audio: SoundType }) => {
             ctx.fillStyle = 'rgba(255, 0, 0, 1)';
             ctx.fillRect(0, 0, width, height);
     
-            const radiusStep = 15;
             const maxRadius = Math.min(width, height) / 1; 
     
             for (let i = 0; i < bufferLength; i++) {

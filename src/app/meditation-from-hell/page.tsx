@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { AudioPlayer } from "./components/AudioPlayer";
 import {SOUNDS, SoundType} from "./util/config";
 import { AudioVisualizer } from "./components/AudioVisualizer";
 
