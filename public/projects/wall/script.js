@@ -1,3 +1,5 @@
+
+
 const canvas = document.getElementById("tileCanvas");
 const ctx = canvas.getContext("2d");
 
@@ -15,6 +17,9 @@ let offsetX = canvas.width / 2 - tileWidth / 2; // Initially center the canvas
 let offsetY = canvas.height / 2 - tileHeight / 2; // Initially center the canvas
 
 let hoveredTile = null; // To track the hovered tile
+let hoveredScale = 1; // Scale factor for the hovered tile
+const hoverScaleTarget = 1.2; // Target scale when hovering
+const hoverScaleSpeed = 0.1; // Speed of scaling animation
 let selectedTile = null; //{ x: 0, y: 0 }; // Start with the center tile selected
 
 
@@ -25,6 +30,27 @@ const imageCache = {};
 function calculateBuffer() {
   return Math.max(3, Math.ceil(3 / scale)); // Ensure 3 additional rows/columns around the viewport
 }
+
+function getImageKey(x, y) {
+    const isHightDefImage = scale > 1.5;
+    return `${x},${y},${isHightDefImage? "1":"0"}`;
+}
+
+function animateHoveredTile() {
+    if (hoveredTile) {
+      hoveredScale += (hoverScaleTarget - hoveredScale) * hoverScaleSpeed;
+    } else {
+      hoveredScale += (1 - hoveredScale) * hoverScaleSpeed;
+    }
+  
+    if (Math.abs(hoveredScale - (hoveredTile ? hoverScaleTarget : 1)) > 0.01) {
+      requestAnimationFrame(animateHoveredTile);
+    }
+  
+    drawGrid(); // Continuously redraw the grid for the animation
+  }
+
+
 function getVisibleTiles() {
     const buffer = calculateBuffer();
   
@@ -42,10 +68,17 @@ function getVisibleTiles() {
     // Load images only for tiles within the visible range
     for (let x = startX; x <= endX; x++) {
       for (let y = startY; y <= endY; y++) {
-        const key = `${x},${y}`;
+        const highRes = scale > 1.5; // Adjust the threshold as needed
+        const key = getImageKey(x,y);
+
+        // console.log("isHighRes", highRes)
+        const imgSrc = highRes 
+            ? `https://picsum.photos/seed/${x}_${y}/1600/900.jpg`
+            : `https://picsum.photos/seed/${x}_${y}/160/90.jpg`;
+
         if (!imageCache[key]) {
           const img = new Image();
-          img.src = `https://picsum.photos/seed/${x}_${y}/160/90.jpg`;
+          img.src = imgSrc;
           imageCache[key] = img;
 
           // Attach an error handler
@@ -53,13 +86,15 @@ function getVisibleTiles() {
                 console.error(`Failed to load image for tile ${key}`);
                 delete imageCache[key]; // Remove broken image from cache
             };
+        } else {
+            // console.log("incache", imageCache[key], highRes)
         }
       }
     }
   
     // Remove images for tiles that are no longer visible
     Object.keys(imageCache).forEach((key) => {
-      const [x, y] = key.split(',').map(Number);
+      const [x, y, highDef] = key.split(',').map(Number);
       if (x < startX || x > endX || y < startY || y > endY) {
         // delete imageCache[key];
       }
@@ -84,21 +119,35 @@ function getVisibleTiles() {
         const tileX = x * tileWidth;
         const tileY = y * tileHeight;
   
-        const key = `${x},${y}`;
+        const key = getImageKey(x,y);
         const img = imageCache[key];
+
   
-        if (img && img.complete) {
-          ctx.drawImage(img, tileX, tileY, tileWidth, tileHeight);
-        } else {
-          ctx.fillStyle = "#f0f0f0";
-          ctx.fillRect(tileX, tileY, tileWidth, tileHeight);
-        }
+      const isHovered = hoveredTile && hoveredTile.x === x && hoveredTile.y === y;
+      if (isHovered) continue; // Skip the hovered tile in this loop
+
+      const currentScale = isHovered ? hoveredScale : 1;
+
+      const scaledTileWidth = tileWidth * currentScale;
+      const scaledTileHeight = tileHeight * currentScale;
+
+      const centerX = tileX + tileWidth / 2;
+      const centerY = tileY + tileHeight / 2;
+
+      const drawX = centerX - scaledTileWidth / 2;
+      const drawY = centerY - scaledTileHeight / 2;
   
-        const isHovered = hoveredTile && hoveredTile.x === x && hoveredTile.y === y;
+      if (img && img.complete) {
+        ctx.drawImage(img, drawX, drawY, scaledTileWidth, scaledTileHeight);
+      } else {
+        ctx.fillStyle = "#f0f0f0";
+        ctx.fillRect(drawX, drawY, scaledTileWidth, scaledTileHeight);
+      }
+
         const isSelected = selectedTile && selectedTile.x === x && selectedTile.y === y;
   
         ctx.strokeStyle = isHovered || isSelected  ? "green" : "#ddd";
-        ctx.strokeRect(tileX, tileY, tileWidth-2, tileHeight+2);
+        ctx.strokeRect(drawX, drawY, scaledTileWidth, scaledTileHeight);
   
         ctx.fillStyle = "#ff0000";
         ctx.font = "14px Arial";
@@ -106,6 +155,53 @@ function getVisibleTiles() {
         ctx.textBaseline = "middle";
         ctx.fillText(`${x},${y}`, tileX + tileWidth / 2, tileY + tileHeight / 2);
       }
+    }
+
+        // Second loop: Draw only the hovered tile on top
+    if (hoveredTile) {
+        const { x, y } = hoveredTile;
+        const tileX = x * tileWidth;
+        const tileY = y * tileHeight;
+    
+        const key = getImageKey(x,y);
+        const img = imageCache[key];
+    
+        const scaledTileWidth = tileWidth * hoveredScale;
+        const scaledTileHeight = tileHeight * hoveredScale;
+    
+        const centerX = tileX + tileWidth / 2;
+        const centerY = tileY + tileHeight / 2;
+    
+        const drawX = centerX - scaledTileWidth / 2;
+        const drawY = centerY - scaledTileHeight / 2;
+    
+        // Add shadow effect
+        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+        ctx.shadowBlur = 50;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 5;
+
+        if (img && img.complete) {
+        ctx.drawImage(img, drawX, drawY, scaledTileWidth, scaledTileHeight);
+        } else {
+        ctx.fillStyle = "#f0f0f0";
+        ctx.fillRect(drawX, drawY, scaledTileWidth, scaledTileHeight);
+        }
+
+          // Reset shadow to avoid affecting other tiles
+        // ctx.shadowColor = "transparent";
+        // ctx.shadowBlur = 0;
+        // ctx.shadowOffsetX = 0;
+        // ctx.shadowOffsetY = 0;
+    
+        ctx.strokeStyle = "#eee";
+        ctx.strokeRect(drawX, drawY, scaledTileWidth, scaledTileHeight);
+    
+        ctx.fillStyle = "#ff0000";
+        ctx.font = "14px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`${x},${y}`, centerX, centerY);
     }
   
     ctx.restore();
@@ -115,6 +211,7 @@ function getVisibleTiles() {
 // Panning and zooming
 let isPanning = false;
 let startX, startY;
+
 
 canvas.addEventListener("mousedown", (e) => {
   isPanning = true;
@@ -133,6 +230,7 @@ canvas.addEventListener("mousemove", (e) => {
     startX = e.clientX;
     startY = e.clientY;
     drawGrid();  // Redraw the grid after panning
+    canvas.style.cursor = "grabbing";
   } else {
     // Update hovered tile based on mouse position
     const mouseX = (e.clientX - offsetX) / scale;
@@ -143,17 +241,22 @@ canvas.addEventListener("mousemove", (e) => {
 
     if (hoveredTile && (hoveredTile.x !== tileX || hoveredTile.y !== tileY)) {
       hoveredTile = { x: tileX, y: tileY };
+      hoveredScale = 1; // Reset scale when a new tile is hovered
+      animateHoveredTile(); // Start the hover animation
       drawGrid();
     } else if (!hoveredTile) {
       hoveredTile = { x: tileX, y: tileY };
       drawGrid();
     }
+
+    canvas.style.cursor = hoveredTile ? "pointer" : "default";
   }
 });
 
 canvas.addEventListener("mouseout", () => {
   hoveredTile = null; // Reset hovered tile when mouse leaves the canvas
-  drawGrid();
+  hoveredScale = 1; // Reset scale
+  animateHoveredTile(); // Animate back to normal
 });
 
 // Zoom functionality with subtle zoom animation
@@ -164,7 +267,7 @@ canvas.addEventListener("wheel", (e) => {
   const mouseY = (e.clientY - offsetY) / scale;
 
   // Zooming with limits
-  const zoomFactor = 1.5;
+  const zoomFactor = 1.1;
   if (e.deltaY < 0) {
     scale = Math.min(scale * zoomFactor, maxZoom); // Prevent zooming in beyond maxZoom
   } else {
@@ -173,7 +276,7 @@ canvas.addEventListener("wheel", (e) => {
 
   offsetX = e.clientX - mouseX * scale;
   offsetY = e.clientY - mouseY * scale;
-
+  
   drawGrid();  // Redraw the grid after zooming
 });
 
