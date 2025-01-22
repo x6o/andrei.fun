@@ -6,7 +6,7 @@ import { AudioVisualizer } from "./components/AudioVisualizer";
 export default function MeditationFromHell() {
   return (
     <>
-    <div className="flex  flex-col mt-5">
+    <div className="flex flex-col mt-5">
       <div className="flex ml-10 mt-5 z-50">
         <Link href="/">
           <Image
