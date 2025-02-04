@@ -27,7 +27,7 @@ export const AudioVisualizer = ({ audio }: { audio: SoundType }) => {
             analyserNode.getByteFrequencyData(dataArray);
     
             ctx.clearRect(0, 0, width, height);
-            ctx.fillStyle = 'rgba(255, 0, 0, 1)';
+            ctx.fillStyle = 'rgba(255, 0, 0, 0)';
             ctx.fillRect(0, 0, width, height);
     
             const maxRadius = Math.min(width, height) / 1; 
