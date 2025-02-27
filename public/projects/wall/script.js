@@ -347,47 +347,6 @@ styleSheet.textContent = `
 `;
 document.head.appendChild(styleSheet);
 
-// Create a Web Worker for image loading
-const workerCode = `
-    const imageCache = {};
-    
-    self.onmessage = function(e) {
-        const { x, y, highRes, key } = e.data;
-        const imgSrc = highRes 
-            ? \`https://picsum.photos/seed/\${x}_\${y}/1600/1600.jpg\`
-            : \`https://picsum.photos/seed/\${x}_\${y}/160/160.jpg\`;
-
-        //const imgSrc = highRes 
-        //    ? \`https://fakeimg.pl/1600x900\`
-        //    : \`https://fakeimg.pl/160x90\`;
-
-        if (imageCache[key]) {
-            self.postMessage({ key, imgSrc: imageCache[key], status: 'cached' });
-            return;
-        }
-
-        fetch(imgSrc)
-            .then(response => response.blob())
-            .then(blob => {
-                const imgUrl = URL.createObjectURL(blob);
-                imageCache[key] = imgUrl;
-                self.postMessage({ key, imgSrc: imgUrl, status: 'loaded' });
-            })
-            .catch(error => {
-                self.postMessage({ key, error: error.message, status: 'error' });
-            });
-    };
-`;
-
-const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
-const worker = new Worker(URL.createObjectURL(workerBlob));
-
-// Add function to get image key that includes resolution
-function getImageKey(x, y) {
-    const isHighDefImage = scale > 1.5;
-    return `${x},${y},${isHighDefImage ? "1" : "0"}`;
-}
-
 // Create and add center area to the grid wrapper
 const centerArea = document.createElement('div');
 centerArea.className = 'center-area';
@@ -461,61 +420,48 @@ function createTile(x, y) {
 
 // Update image loading function for tiles
 function loadImage(tile, x, y, forceHighRes = false) {
-    const img = new Image();
-    
-    img.onload = () => {
-        tile.style.backgroundImage = `url(${img.src})`;
-    };
-    
-    // Determine if we should load high-res based on current scale
+    // Skip if tile is already loading this resolution
     const shouldLoadHighRes = forceHighRes || scale > 1.5;
-    
-    // Switch to high-res
-    if (shouldLoadHighRes && tile.dataset.highRes === 'false') {
-        img.src = `https://fakeimg.pl/1600x1600`;
-        tile.dataset.highRes = 'true';
-    } 
-    // Switch back to low-res
-    else if (!shouldLoadHighRes && tile.dataset.highRes === 'true') {
-        img.src = `https://fakeimg.pl/600x600`;
-        tile.dataset.highRes = 'false';
+    const currentRes = tile.dataset.highRes === 'true';
+    if (shouldLoadHighRes === currentRes && tile.style.backgroundImage) {
+        return;
     }
-    // Initial low-res load
-    else if (!shouldLoadHighRes && tile.dataset.highRes === 'false') {
-        img.src = `https://fakeimg.pl/600x600`;
-    }
-}
 
-// Handle worker responses
-worker.onmessage = function(e) {
-    const { key, imgSrc, status, error } = e.data;
-    
-    // Find all tiles waiting for this image
-    const tiles = document.querySelectorAll(`[data-loading="${key}"]`);
-    
-    tiles.forEach(tile => {
-        if (status === 'loaded' || status === 'cached') {
-            tile.style.backgroundImage = `url(${imgSrc})`;
-            tile.style.backgroundSize = 'cover';
-            
-            // Remove loader if it exists
-            const loader = tile.querySelector('.loader');
-            if (loader) {
-                tile.removeChild(loader);
-            }
-        } else if (status === 'error') {
-            console.error(`Failed to load image for tile ${key}: ${error}`);
-            
-            // Remove loader if it exists
-            const loader = tile.querySelector('.loader');
-            if (loader) {
-                tile.removeChild(loader);
-            }
-        }
+    // Add loading indicator
+    if (!tile.querySelector('.tile-loader')) {
+        const loader = document.createElement('div');
+        loader.className = 'tile-loader';
+        tile.appendChild(loader);
+    }
+
+    // Create new image
+    const img = new Image();
+    const imgSrc = shouldLoadHighRes 
+        ? `https://picsum.photos/seed/${x}_${y}/1600/1600.jpg`
+        : `https://picsum.photos/seed/${x}_${y}/160/160.jpg`;
+
+    img.onload = () => {
+        tile.style.backgroundImage = `url(${imgSrc})`;
+        tile.dataset.highRes = shouldLoadHighRes.toString();
         
-        delete tile.dataset.loading;
-    });
-};
+        // Remove loader
+        const loader = tile.querySelector('.tile-loader');
+        if (loader) {
+            tile.removeChild(loader);
+        }
+    };
+
+    img.onerror = () => {
+        console.error(`Failed to load image for tile ${x},${y}`);
+        // Remove loader on error
+        const loader = tile.querySelector('.tile-loader');
+        if (loader) {
+            tile.removeChild(loader);
+        }
+    };
+
+    img.src = imgSrc;
+}
 
 function updateVisibleTiles() {
     const buffer = Math.max(3, Math.ceil(4 / scale));
