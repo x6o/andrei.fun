@@ -426,9 +426,9 @@ function isMobileDevice() {
 }
 
 function loadImage(tile, x, y, forceHighRes = false) {
-    // Force high-res on mobile devices during initial load if tile has no image
-    const isInitialMobileLoad = isMobileDevice() && !tile.style.backgroundImage;
-    const shouldLoadHighRes = forceHighRes || scale > 1.5 || isInitialMobileLoad;
+    // Force low-res on initial load, regardless of device
+    const isInitialLoad = !tile.style.backgroundImage;
+    const shouldLoadHighRes = !isInitialLoad && (forceHighRes || scale > 1.5);
     
     // Skip if already loaded at the correct resolution
     if (tile.dataset.highRes === shouldLoadHighRes.toString() && tile.style.backgroundImage) {
@@ -459,6 +459,11 @@ function loadImage(tile, x, y, forceHighRes = false) {
         const loader = tile.querySelector('.tile-loader');
         if (loader) {
             tile.removeChild(loader);
+        }
+
+        // If this was the initial load on mobile, immediately trigger high-res load
+        if (isInitialLoad && isMobileDevice() && scale > 1.5) {
+            loadImage(tile, x, y, true);
         }
     };
 
