@@ -380,7 +380,7 @@ function createTile(x, y) {
     tile.className = 'grid-tile';
     tile.dataset.x = x;
     tile.dataset.y = y;
-    tile.dataset.highRes = 'false'; // Track if high-res is loaded
+    tile.dataset.highRes = 'false';
 
     // Add coordinates display
     const coordinates = document.createElement('div');
@@ -415,13 +415,17 @@ function createTile(x, y) {
         tile.style.filter = 'none';
     });
 
+    // Immediately load the low-res image
+    loadImage(tile, x, y, false);
+
     return tile;
 }
 
-// Update image loading function for tiles
 function loadImage(tile, x, y, forceHighRes = false) {
-    // Skip if tile already has an image and we're not forcing a resolution change
-    if (tile.style.backgroundImage && !forceHighRes) {
+    const shouldLoadHighRes = forceHighRes || scale > 1.5;
+    
+    // Skip if already loaded at the correct resolution
+    if (tile.dataset.highRes === shouldLoadHighRes.toString() && tile.style.backgroundImage) {
         return;
     }
 
@@ -434,12 +438,14 @@ function loadImage(tile, x, y, forceHighRes = false) {
 
     // Create new image
     const img = new Image();
-    const shouldLoadHighRes = forceHighRes || scale > 1.5;
     const imgSrc = shouldLoadHighRes 
         ? `https://picsum.photos/seed/${x}_${y}/1600/1600.jpg`
         : `https://picsum.photos/seed/${x}_${y}/160/160.jpg`;
 
+    console.log(`Loading ${shouldLoadHighRes ? 'high' : 'low'}-res image for tile ${x},${y}`); // Debug log
+
     img.onload = () => {
+        console.log(`Loaded image for tile ${x},${y}`); // Debug log
         tile.style.backgroundImage = `url(${imgSrc})`;
         tile.dataset.highRes = shouldLoadHighRes.toString();
         
