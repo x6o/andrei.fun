@@ -1,314 +1,1073 @@
-const canvas = document.getElementById("tileCanvas");
-const ctx = canvas.getContext("2d");
-
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-
-// Grid settings
-const tileWidth = 160; // 16:9 aspect ratio (for 16 width, 9 height => width/height = 16/9)
-const tileHeight = 90;
-const minZoom = 0.6;  // Limit for zooming out
-const maxZoom = 2;   // Limit for zooming in
-const gridSize = 150; // Size of the grid (50x50 tiles)
+// Grid settings for perfect hexagonal tiling
+const tileWidth = 160;
+const tileHeight = tileWidth * 0.876; // height = width * sin(60°)
+const verticalOffset = tileHeight * 0.876; // Reduce vertical offset to eliminate gaps
+const horizontalOffset = tileWidth + 3.455; // Full width for proper spacing
+const minZoom = 0.7;
+const maxZoom = 2;
+const gridSize = 150;
 let scale = 1;
-let offsetX = canvas.width / 2 - tileWidth / 2; // Initially center the canvas
-let offsetY = canvas.height / 2 - tileHeight / 2; // Initially center the canvas
+let offsetX = 0;
+let offsetY = 0;
 
-let hoveredTile = null; // To track the hovered tile
-let hoveredScale = 1; // Scale factor for the hovered tile
-const hoverScaleTarget = 1.2; // Target scale when hovering
-const hoverScaleSpeed = 0.1; // Speed of scaling animation
-let selectedTile = null; //{ x: 0, y: 0 }; // Start with the center tile selected
+// Mouse and touch interaction states
+let isPanning = false;
+let wasPanning = false;
+let startX = 0;
+let startY = 0;
 
+// Create main container
+const container = document.createElement('div');
+container.id = 'grid-container';
+container.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000000;
+`;
+document.body.appendChild(container);
 
-// Image cache
+// Add black background to body as well to ensure no white edges
+document.body.style.backgroundColor = '#000000';
+
+// Create grid wrapper for transformations
+const gridWrapper = document.createElement('div');
+gridWrapper.id = 'grid-wrapper';
+gridWrapper.style.cssText = `
+    position: absolute;
+    transform-origin: 0 0;
+`;
+container.appendChild(gridWrapper);
+
+// Image cache and tile tracking
 const imageCache = {};
+const visibleTiles = new Set();
+let hoveredTile = null;
 
-// Calculate the buffer size based on zoom level
-function calculateBuffer() {
-  return Math.max(3, Math.ceil(3 / scale)); // Ensure 3 additional rows/columns around the viewport
+// Update center area size
+const centerAreaSize = tileWidth * 2;
+
+// Add CSS for loader to the document
+const styleSheet = document.createElement("style");
+styleSheet.textContent = `
+    .loader {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 24px;
+        height: 24px;
+        margin: -12px 0 0 -12px;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #fff;
+        animation: spin 1s ease-in-out infinite;
+        pointer-events: none;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .fullscreen-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0);
+        transition: background-color 0.3s ease;
+        z-index: 1000;
+        display: flex;
+        pointer-events: none;
+    }
+
+    .fullscreen-image-container {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+        pointer-events: auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .fullscreen-image {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+
+    .social-sidebar {
+        width: 285px;
+        background: white;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        padding: 20px;
+        box-sizing: border-box;
+        overflow-y: auto;
+        pointer-events: auto;
+    }
+
+    .social-sidebar.visible {
+        transform: translateX(0);
+    }
+
+    .author-profile {
+        display: flex;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .author-avatar {
+        width: 50px;
+        height: 50px;
+        border-radius: 25px;
+        margin-right: 15px;
+        background-size: cover;
+    }
+
+    .author-info {
+        flex: 1;
+    }
+
+    .author-name {
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+
+    .author-username {
+        color: #666;
+    }
+
+    .like-section {
+        display: flex;
+        align-items: center;
+        margin-bottom: 20px;
+        padding: 10px 0;
+        border-bottom: 1px solid #eee;
+    }
+
+    .like-button {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        padding: 5px 10px;
+        margin-right: 10px;
+    }
+
+    .comments-section {
+        margin-bottom: 20px;
+    }
+
+    .comment {
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .comment-author {
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+
+    .comment-text {
+        color: #333;
+    }
+
+    .add-comment {
+        position: relative;
+    }
+
+    .comment-input {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        resize: none;
+        box-sizing: border-box;
+    }
+
+    .post-button {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        background: #0095f6;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 5px 10px;
+        cursor: pointer;
+    }
+
+    .post-button:disabled {
+        background: #b2dffc;
+        cursor: default;
+    }
+
+    .grid-tile {
+        position: absolute;
+        width: ${tileWidth}px;
+        height: ${tileWidth}px;
+        cursor: pointer;
+        transition: transform 0.2s ease, filter 0.2s ease;
+        clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+        background-color: #000000;
+        background-size: cover;
+        background-position: center;
+        overflow: visible;
+    }
+
+    .grid-tile:hover {
+        filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.8));
+        z-index: 1;
+    }
+
+    .center-area {
+        position: absolute;
+        width: ${centerAreaSize}px;
+        height: ${centerAreaSize}px;
+        left: 50%;
+        top: 50%;
+        transform: translate(-25%, -25%);
+        background: #000000;
+        border-radius: 50%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 2;
+        color: white;
+        text-align: center;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        pointer-events: none;
+    }
+
+    .center-logo {
+        font-size: 36px;
+        margin-bottom: 15px;
+    }
+
+    .center-slogan {
+        font-size: 18px;
+        max-width: 80%;
+        line-height: 1.4;
+    }
+
+    #resetButton {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.85);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 20px;
+        padding: 8px 20px 8px 16px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.3s ease;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    #resetButton:hover {
+        background: rgba(0, 0, 0, 0.95);
+        border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    #resetButton.visible {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    #resetButton svg {
+        width: 14px;
+        height: 14px;
+        fill: currentColor;
+    }
+
+    .tile-loader {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 40px;
+        height: 40px;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #fff;
+        animation: spin 1s linear infinite;
+        z-index: 2;
+    }
+
+    @keyframes spin {
+        to {
+            transform: translate(-50%, -50%) rotate(360deg);
+        }
+    }
+
+    .grid-tile.loading::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1;
+    }
+
+    .tile-coordinates {
+        position: absolute;
+        bottom: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12px;
+        font-family: monospace;
+        pointer-events: none;
+        z-index: 1;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        background: rgba(0, 0, 0, 0.3);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    .grid-tile:hover .tile-coordinates {
+        color: rgba(255, 255, 255, 0.9);
+    }
+`;
+document.head.appendChild(styleSheet);
+
+// Create a Web Worker for image loading
+const workerCode = `
+    const imageCache = {};
+    
+    self.onmessage = function(e) {
+        const { x, y, highRes, key } = e.data;
+        const imgSrc = highRes 
+            ? \`https://picsum.photos/seed/\${x}_\${y}/1600/1600.jpg\`
+            : \`https://picsum.photos/seed/\${x}_\${y}/160/160.jpg\`;
+
+        //const imgSrc = highRes 
+        //    ? \`https://fakeimg.pl/1600x900\`
+        //    : \`https://fakeimg.pl/160x90\`;
+
+        if (imageCache[key]) {
+            self.postMessage({ key, imgSrc: imageCache[key], status: 'cached' });
+            return;
+        }
+
+        fetch(imgSrc)
+            .then(response => response.blob())
+            .then(blob => {
+                const imgUrl = URL.createObjectURL(blob);
+                imageCache[key] = imgUrl;
+                self.postMessage({ key, imgSrc: imgUrl, status: 'loaded' });
+            })
+            .catch(error => {
+                self.postMessage({ key, error: error.message, status: 'error' });
+            });
+    };
+`;
+
+const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+const worker = new Worker(URL.createObjectURL(workerBlob));
+
+// Add function to get image key that includes resolution
+function getImageKey(x, y) {
+    const isHighDefImage = scale > 1.5;
+    return `${x},${y},${isHighDefImage ? "1" : "0"}`;
 }
 
-function animateHoveredTile() {
-    if (hoveredTile) {
-      hoveredScale += (hoverScaleTarget - hoveredScale) * hoverScaleSpeed;
-    } else {
-      hoveredScale += (1 - hoveredScale) * hoverScaleSpeed;
-    }
-  
-    if (Math.abs(hoveredScale - (hoveredTile ? hoverScaleTarget : 1)) > 0.01) {
-      requestAnimationFrame(animateHoveredTile);
-    }
-  
-    drawGrid(); // Continuously redraw the grid for the animation
-  }
+// Create and add center area to the grid wrapper
+const centerArea = document.createElement('div');
+centerArea.className = 'center-area';
+centerArea.innerHTML = `
+    <div class="center-logo">GridScape™</div>
+    <div class="center-slogan">Text text text<br>More text</div>
+`;
+gridWrapper.appendChild(centerArea);
 
+function isWithinCenterArea(x, y) {
+    // Convert grid coordinates to pixel coordinates
+    const pixelX = x * horizontalOffset + (y % 2 ? horizontalOffset/2 : 0);
+    const pixelY = y * verticalOffset;
+    
+    // Calculate distance from grid center
+    const dx = pixelX;
+    const dy = pixelY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Return true if within center area radius
+    return distance < centerAreaSize * 0.75;
+}
 
-function getVisibleTiles() {
-    const buffer = calculateBuffer();
-  
-    const startX = Math.floor((-offsetX / scale) / tileWidth) - buffer;
-    const endX = Math.ceil((canvas.width - offsetX) / (scale * tileWidth)) + buffer;
-    const startY = Math.floor((-offsetY / scale) / tileHeight) - buffer;
-    const endY = Math.ceil((canvas.height - offsetY) / (scale * tileHeight)) + buffer;
-  
-    return { startX, endX, startY, endY };
-  }
-  
-  function loadVisibleImages() {
-    const { startX, endX, startY, endY } = getVisibleTiles();
-  
-    // Load images only for tiles within the visible range
-    for (let x = startX; x <= endX; x++) {
-      for (let y = startY; y <= endY; y++) {
-        const key = `${x},${y}`;
-        if (!imageCache[key]) {
-          const img = new Image();
-          img.src = `https://picsum.photos/seed/${x}_${y}/160/90.jpg`;
-          imageCache[key] = img;
-
-          // Attach an error handler
-            img.onerror = function () {
-                console.error(`Failed to load image for tile ${key}`);
-                delete imageCache[key]; // Remove broken image from cache
-            };
-        }
-      }
+function createTile(x, y) {
+    // Skip tiles that would be in the center area
+    if (isWithinCenterArea(x, y)) {
+        return null;
     }
-  
-    // Remove images for tiles that are no longer visible
-    Object.keys(imageCache).forEach((key) => {
-      const [x, y] = key.split(',').map(Number);
-      if (x < startX || x > endX || y < startY || y > endY) {
-        // delete imageCache[key];
-      }
+
+    const tile = document.createElement('div');
+    tile.className = 'grid-tile';
+    tile.dataset.x = x;
+    tile.dataset.y = y;
+    tile.dataset.highRes = 'false'; // Track if high-res is loaded
+
+    // Add coordinates display
+    const coordinates = document.createElement('div');
+    coordinates.className = 'tile-coordinates';
+    coordinates.textContent = `${x},${y}`;
+    tile.appendChild(coordinates);
+
+    // Calculate position for perfect hexagonal tiling
+    const xPos = x * horizontalOffset + (y % 2 ? horizontalOffset/2 : 0);
+    const yPos = y * verticalOffset;
+
+    tile.style.cssText = `
+        position: absolute;
+        width: ${tileWidth}px;
+        height: ${tileWidth}px;
+        left: ${xPos}px;
+        top: ${yPos}px;
+        transition: transform 0.2s ease, filter 0.2s ease;
+    `;
+
+    tile.addEventListener('mouseenter', () => {
+        hoveredTile = { x, y };
+        tile.style.transform = 'scale(1.2)';
+        tile.style.zIndex = '1';
+        tile.style.filter = 'drop-shadow(0 0 20px rgba(255, 255, 255, 0.8))';
     });
-  }
-  
-  // Update `drawGrid` to load visible images dynamically
-  function drawGrid() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
-    ctx.save();
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(scale, scale);
-  
-    // Calculate visible tiles and load images
-    loadVisibleImages();
-  
-    const { startX, endX, startY, endY } = getVisibleTiles();
-  
-    for (let x = startX; x <= endX; x++) {
-      for (let y = startY; y <= endY; y++) {
-        const tileX = x * tileWidth;
-        const tileY = y * tileHeight;
-  
-        const key = `${x},${y}`;
-        const img = imageCache[key];
 
-  
-      const isHovered = hoveredTile && hoveredTile.x === x && hoveredTile.y === y;
-      if (isHovered) continue; // Skip the hovered tile in this loop
+    tile.addEventListener('mouseleave', () => {
+        hoveredTile = null;
+        tile.style.transform = 'scale(1)';
+        tile.style.zIndex = '0';
+        tile.style.filter = 'none';
+    });
 
-      const currentScale = isHovered ? hoveredScale : 1;
+    return tile;
+}
 
-      const scaledTileWidth = tileWidth * currentScale;
-      const scaledTileHeight = tileHeight * currentScale;
-
-      const centerX = tileX + tileWidth / 2;
-      const centerY = tileY + tileHeight / 2;
-
-      const drawX = centerX - scaledTileWidth / 2;
-      const drawY = centerY - scaledTileHeight / 2;
-  
-      if (img && img.complete) {
-        ctx.drawImage(img, drawX, drawY, scaledTileWidth, scaledTileHeight);
-      } else {
-        ctx.fillStyle = "#f0f0f0";
-        ctx.fillRect(drawX, drawY, scaledTileWidth, scaledTileHeight);
-      }
-
-        const isSelected = selectedTile && selectedTile.x === x && selectedTile.y === y;
-  
-        ctx.strokeStyle = isHovered || isSelected  ? "green" : "#ddd";
-        ctx.strokeRect(drawX, drawY, scaledTileWidth, scaledTileHeight);
-  
-        ctx.fillStyle = "#ff0000";
-        ctx.font = "14px Arial";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`${x},${y}`, tileX + tileWidth / 2, tileY + tileHeight / 2);
-      }
+// Update image loading function for tiles
+function loadImage(tile, x, y, forceHighRes = false) {
+    const img = new Image();
+    
+    img.onload = () => {
+        tile.style.backgroundImage = `url(${img.src})`;
+    };
+    
+    // Determine if we should load high-res based on current scale
+    const shouldLoadHighRes = forceHighRes || scale > 1.5;
+    
+    // Switch to high-res
+    if (shouldLoadHighRes && tile.dataset.highRes === 'false') {
+        img.src = `https://fakeimg.pl/1600x1600`;
+        tile.dataset.highRes = 'true';
+    } 
+    // Switch back to low-res
+    else if (!shouldLoadHighRes && tile.dataset.highRes === 'true') {
+        img.src = `https://fakeimg.pl/600x600`;
+        tile.dataset.highRes = 'false';
     }
+    // Initial low-res load
+    else if (!shouldLoadHighRes && tile.dataset.highRes === 'false') {
+        img.src = `https://fakeimg.pl/600x600`;
+    }
+}
 
-        // Second loop: Draw only the hovered tile on top
-    if (hoveredTile) {
-        const { x, y } = hoveredTile;
-        const tileX = x * tileWidth;
-        const tileY = y * tileHeight;
+// Handle worker responses
+worker.onmessage = function(e) {
+    const { key, imgSrc, status, error } = e.data;
     
-        const key = `${x},${y}`;
-        const img = imageCache[key];
+    // Find all tiles waiting for this image
+    const tiles = document.querySelectorAll(`[data-loading="${key}"]`);
     
-        const scaledTileWidth = tileWidth * hoveredScale;
-        const scaledTileHeight = tileHeight * hoveredScale;
-    
-        const centerX = tileX + tileWidth / 2;
-        const centerY = tileY + tileHeight / 2;
-    
-        const drawX = centerX - scaledTileWidth / 2;
-        const drawY = centerY - scaledTileHeight / 2;
-    
-        // Add shadow effect
-        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-        ctx.shadowBlur = 50;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 5;
-
-        if (img && img.complete) {
-        ctx.drawImage(img, drawX, drawY, scaledTileWidth, scaledTileHeight);
-        } else {
-        ctx.fillStyle = "#f0f0f0";
-        ctx.fillRect(drawX, drawY, scaledTileWidth, scaledTileHeight);
+    tiles.forEach(tile => {
+        if (status === 'loaded' || status === 'cached') {
+            tile.style.backgroundImage = `url(${imgSrc})`;
+            tile.style.backgroundSize = 'cover';
+            
+            // Remove loader if it exists
+            const loader = tile.querySelector('.loader');
+            if (loader) {
+                tile.removeChild(loader);
+            }
+        } else if (status === 'error') {
+            console.error(`Failed to load image for tile ${key}: ${error}`);
+            
+            // Remove loader if it exists
+            const loader = tile.querySelector('.loader');
+            if (loader) {
+                tile.removeChild(loader);
+            }
         }
+        
+        delete tile.dataset.loading;
+    });
+};
 
-          // Reset shadow to avoid affecting other tiles
-        // ctx.shadowColor = "transparent";
-        // ctx.shadowBlur = 0;
-        // ctx.shadowOffsetX = 0;
-        // ctx.shadowOffsetY = 0;
+function updateVisibleTiles() {
+    const buffer = Math.max(3, Math.ceil(4 / scale));
     
-        ctx.strokeStyle = "green";
-        ctx.strokeRect(drawX, drawY, scaledTileWidth, scaledTileHeight);
+    // Calculate viewport center in grid coordinates
+    const centerX = (-offsetX / scale + window.innerWidth / 2 / scale) / horizontalOffset;
+    const centerY = (-offsetY / scale + window.innerHeight / 2 / scale) / verticalOffset;
     
-        ctx.fillStyle = "#ff0000";
-        ctx.font = "14px Arial";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`${x},${y}`, centerX, centerY);
+    // Adjust calculations for tighter hexagonal grid
+    const startX = Math.floor((-offsetX / scale) / horizontalOffset) - buffer;
+    const endX = Math.ceil((window.innerWidth - offsetX) / (scale * horizontalOffset)) + buffer;
+    const startY = Math.floor((-offsetY / scale) / verticalOffset) - buffer;
+    const endY = Math.ceil((window.innerHeight - offsetY) / (scale * verticalOffset)) + buffer;
+
+    // Collect all tiles that need to be loaded
+    const tilesToLoad = [];
+    const currentTiles = new Set();
+
+    for (let x = startX; x <= endX; x++) {
+        for (let y = startY; y <= endY; y++) {
+            const key = `${x},${y}`;
+            currentTiles.add(key);
+
+            if (!visibleTiles.has(key)) {
+                const tile = createTile(x, y);
+                if (tile) {
+                    gridWrapper.appendChild(tile);
+                    visibleTiles.add(key);
+                    
+                    // Calculate distance from center for loading priority
+                    const dx = x - centerX;
+                    const dy = y - centerY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    tilesToLoad.push({ tile, x, y, distance });
+                }
+            } else {
+                // Check existing tiles for resolution update if needed
+                const tile = gridWrapper.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+                if (tile && scale > 1.5 && tile.dataset.highRes === 'false') {
+                    loadImage(tile, x, y, true);
+                }
+            }
+        }
     }
-  
-    ctx.restore();
-  }
-  
 
-// Panning and zooming
-let isPanning = false;
-let startX, startY;
+    // Remove tiles that are no longer visible
+    for (const key of visibleTiles) {
+        if (!currentTiles.has(key)) {
+            const [x, y] = key.split(',');
+            const tile = gridWrapper.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+            if (tile) {
+                gridWrapper.removeChild(tile);
+            }
+            visibleTiles.delete(key);
+        }
+    }
 
-canvas.addEventListener("mousedown", (e) => {
-  isPanning = true;
-  startX = e.clientX;
-  startY = e.clientY;
-});
+    // Update grid wrapper transform only - center area will transform with it
+    gridWrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
 
-canvas.addEventListener("mouseup", () => {
-  isPanning = false;
-});
+    // Sort tiles by distance from center before loading
+    tilesToLoad.sort((a, b) => a.distance - b.distance);
 
-canvas.addEventListener("mousemove", (e) => {
-  if (isPanning) {
-    offsetX += e.clientX - startX;
-    offsetY += e.clientY - startY;
+    // Load images in the background, starting from center
+    requestIdleCallback(() => {
+        tilesToLoad.forEach(({ tile, x, y }) => {
+            loadImage(tile, x, y);
+        });
+    }, { timeout: 1000 });
+
+    // Update button visibility
+    updateButtonVisibility();
+}
+
+// Mouse panning functionality
+container.addEventListener('mousedown', (e) => {
+    isPanning = true;
+    wasPanning = false;
     startX = e.clientX;
     startY = e.clientY;
-    drawGrid();  // Redraw the grid after panning
-  } else {
-    // Update hovered tile based on mouse position
-    const mouseX = (e.clientX - offsetX) / scale;
-    const mouseY = (e.clientY - offsetY) / scale;
+    container.style.cursor = 'grabbing';
+});
 
-    const tileX = Math.floor(mouseX / tileWidth);
-    const tileY = Math.floor(mouseY / tileHeight);
-
-    if (hoveredTile && (hoveredTile.x !== tileX || hoveredTile.y !== tileY)) {
-      hoveredTile = { x: tileX, y: tileY };
-      hoveredScale = 1; // Reset scale when a new tile is hovered
-      animateHoveredTile(); // Start the hover animation
-      drawGrid();
-    } else if (!hoveredTile) {
-      hoveredTile = { x: tileX, y: tileY };
-      drawGrid();
+container.addEventListener('mousemove', (e) => {
+    if (isPanning) {
+        wasPanning = true;
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+        offsetX += deltaX;
+        offsetY += deltaY;
+        startX = e.clientX;
+        startY = e.clientY;
+        updateVisibleTiles();
     }
-  }
 });
 
-canvas.addEventListener("mouseout", () => {
-  hoveredTile = null; // Reset hovered tile when mouse leaves the canvas
-  hoveredScale = 1; // Reset scale
-  animateHoveredTile(); // Animate back to normal
+container.addEventListener('mouseup', () => {
+    isPanning = false;
+    container.style.cursor = 'default';
 });
 
-// Zoom functionality with subtle zoom animation
-canvas.addEventListener("wheel", (e) => {
-  e.preventDefault();
-
-  const mouseX = (e.clientX - offsetX) / scale;
-  const mouseY = (e.clientY - offsetY) / scale;
-
-  // Zooming with limits
-  const zoomFactor = 1.5;
-  if (e.deltaY < 0) {
-    scale = Math.min(scale * zoomFactor, maxZoom); // Prevent zooming in beyond maxZoom
-  } else {
-    scale = Math.max(scale / zoomFactor, minZoom); // Prevent zooming out beyond minZoom
-  }
-
-  offsetX = e.clientX - mouseX * scale;
-  offsetY = e.clientY - mouseY * scale;
-
-  drawGrid();  // Redraw the grid after zooming
+container.addEventListener('mouseleave', () => {
+    isPanning = false;
+    container.style.cursor = 'default';
 });
 
-// Handle window resizing
-window.addEventListener("resize", () => {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-//   offsetX = canvas.width / 2;
-//   offsetY = canvas.height / 2;
-  drawGrid();  // Redraw grid after resizing
-});
+// Touch handling variables
+let lastTouchDistance = 0;
+let isTouching = false;
+let wasTouching = false;
 
-// Add event listener to reset button
-const resetButton = document.getElementById("resetButton");
-resetButton.addEventListener("click", () => {
-  // Reset the target position to (0, 0) tile (centered)
-  offsetX = canvas.width / 2 - tileWidth / 2;
-  offsetY = canvas.height / 2 - tileHeight / 2;
-  drawGrid();  // Redraw the grid after resetting
-});
+// Add touch event listeners
+container.addEventListener('touchstart', (e) => {
+    isTouching = true;
+    wasTouching = false;
+    
+    if (e.touches.length === 1) {
+        // Single touch for panning
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+        // Two touches for pinch zooming
+        lastTouchDistance = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+        );
+    }
+    e.preventDefault();
+}, { passive: false });
 
-// Keyboard navigation
-window.addEventListener("keydown", (e) => {
-    let { x, y } = selectedTile ?? {x:null, y:null};
-  
-    switch (e.key) {
-      case "ArrowUp":
-        y -= 1;
-        break;
-      case "ArrowDown":
-        y += 1;
-        break;
-      case "ArrowLeft":
-        x -= 1;
-        break;
-      case "ArrowRight":
-        x += 1;
-        break;
-      case " ":
-      case "Enter":
-        if (x&&y) {
-            console.log(`Tile selected: x=${selectedTile.x}, y=${selectedTile.y}`);
+container.addEventListener('touchmove', (e) => {
+    if (!isTouching) return;
+    wasTouching = true;
+
+    if (e.touches.length === 1) {
+        // Handle panning
+        const deltaX = e.touches[0].clientX - startX;
+        const deltaY = e.touches[0].clientY - startY;
+        
+        offsetX += deltaX;
+        offsetY += deltaY;
+        
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+        // Handle pinch zooming
+        const currentDistance = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+        );
+        
+        if (lastTouchDistance > 0) {
+            // Calculate center of pinch
+            const touchCenter = {
+                x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+            };
+            
+            // Calculate zoom
+            const wasHighRes = scale > 1.5;
+            const zoomDelta = currentDistance / lastTouchDistance;
+            const prevScale = scale;
+            scale = Math.min(Math.max(scale * zoomDelta, minZoom), maxZoom);
+            
+            // Adjust offset to zoom around pinch center
+            const mouseX = (touchCenter.x - offsetX) / prevScale;
+            const mouseY = (touchCenter.y - offsetY) / prevScale;
+            offsetX = touchCenter.x - mouseX * scale;
+            offsetY = touchCenter.y - mouseY * scale;
+
+            // Check if we crossed the high-res threshold
+            const isHighRes = scale > 1.5;
+            if (wasHighRes !== isHighRes) {
+                for (const key of visibleTiles) {
+                    const [x, y] = key.split(',');
+                    const tile = gridWrapper.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+                    if (tile) {
+                        loadImage(tile, parseInt(x), parseInt(y));
+                    }
+                }
+            }
         }
-        return;
-      default:
-        return; // Ignore other keys
+        
+        lastTouchDistance = currentDistance;
     }
-  
-    // Update selected tile and redraw
-    selectedTile = { x, y };
-    drawGrid();
-  });
+    
+    updateVisibleTiles();
+    e.preventDefault();
+}, { passive: false });
 
-// Initial draw
-drawGrid();
+container.addEventListener('touchend', (e) => {
+    if (e.touches.length === 0) {
+        isTouching = false;
+        lastTouchDistance = 0;
+    } else if (e.touches.length === 1) {
+        // Reset touch start position for continued panning
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        lastTouchDistance = 0;
+    }
+});
+
+// Click/tap handler
+container.addEventListener('click', (e) => {
+    if (wasPanning || wasTouching) {
+        wasPanning = false;
+        wasTouching = false;
+        return;
+    }
+
+    if (hoveredTile) {
+        const { x, y } = hoveredTile;
+        
+        // Get the clicked tile
+        const tile = gridWrapper.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+        
+        // Add loading state to tile
+        tile.classList.add('loading');
+        const loader = document.createElement('div');
+        loader.className = 'tile-loader';
+        tile.appendChild(loader);
+
+        // Load high-res image
+        const highResImage = new Image();
+        highResImage.onload = () => {
+            // Remove loading state
+            tile.classList.remove('loading');
+            tile.removeChild(loader);
+
+            // Create and show fullscreen view
+            showFullscreenImage(tile, x, y);
+        };
+        highResImage.src = `https://fakeimg.pl/1600x1600`;
+    }
+});
+
+// Separate function for showing fullscreen view
+function showFullscreenImage(tile, x, y) {
+    const tileRect = tile.getBoundingClientRect();
+
+    const fullscreenContainer = document.createElement('div');
+    fullscreenContainer.className = 'fullscreen-container';
+
+    const imageContainer = document.createElement('div');
+    imageContainer.className = 'fullscreen-image-container';
+
+    const fullscreenImage = document.createElement('img');
+    fullscreenImage.className = 'fullscreen-image';
+    
+    // Use 1600x1600 for fullscreen view
+    fullscreenImage.src = `https://fakeimg.pl/1600x1600`;
+    
+    fullscreenImage.style.cssText = `
+        position: absolute;
+        width: 1600px;
+        height: 1600px;
+        transform-origin: 0 0;
+        transition: none;
+    `;
+
+    // Create sidebar
+    const sidebar = document.createElement('div');
+    sidebar.className = 'social-sidebar';
+    sidebar.innerHTML = `
+        <div class="author-profile">
+            <div class="author-avatar" style="background-image: url('https://picsum.photos/50/50')"></div>
+            <div class="author-info">
+                <div class="author-name">John Doe</div>
+                <div class="author-username">@johndoe</div>
+            </div>
+        </div>
+        <div class="like-section">
+            <button class="like-button">❤️</button>
+            <span class="like-count">1,234 likes</span>
+        </div>
+        <div class="comments-section">
+            <div class="comment">
+                <div class="comment-author">alice_smith</div>
+                <div class="comment-text">Beautiful shot! Love the composition.</div>
+            </div>
+            <div class="comment">
+                <div class="comment-author">photo_enthusiast</div>
+                <div class="comment-text">The lighting in this is perfect!</div>
+            </div>
+        </div>
+        <div class="add-comment">
+            <textarea class="comment-input" placeholder="Add a comment..." rows="3"></textarea>
+            <button class="post-button" disabled>Post</button>
+        </div>
+    `;
+
+    imageContainer.appendChild(fullscreenImage);
+    fullscreenContainer.appendChild(imageContainer);
+    fullscreenContainer.appendChild(sidebar);
+    document.body.appendChild(fullscreenContainer);
+
+    // Calculate and set initial position
+    const initialScale = tileRect.width / 1600;
+    fullscreenImage.style.transform = `
+        translate(${tileRect.left}px, ${tileRect.top}px) 
+        scale(${initialScale})
+    `;
+
+    // Force reflow
+    fullscreenImage.offsetHeight;
+
+    // Start transition to fullscreen
+    fullscreenImage.style.transition = 'transform 0.3s linear';
+    requestAnimationFrame(() => {
+        fullscreenContainer.style.backgroundColor = 'rgba(0,0,0,0.9)';
+        
+        const containerWidth = window.innerWidth - 285;
+        const containerHeight = window.innerHeight;
+        const targetScale = Math.min(
+            containerWidth / 1600,
+            containerHeight / 1600
+        );
+        const targetX = (containerWidth - 1600 * targetScale) / 2;
+        const targetY = (containerHeight - 1600 * targetScale) / 2;
+
+        fullscreenImage.style.transform = `
+            translate(${targetX}px, ${targetY}px) 
+            scale(${targetScale})
+        `;
+        sidebar.classList.add('visible');
+    });
+
+    // Add comment input functionality
+    const commentInput = sidebar.querySelector('.comment-input');
+    const postButton = sidebar.querySelector('.post-button');
+    
+    commentInput.addEventListener('input', () => {
+        postButton.disabled = !commentInput.value.trim();
+    });
+
+    // Like button functionality
+    const likeButton = sidebar.querySelector('.like-button');
+    const likeCount = sidebar.querySelector('.like-count');
+    let isLiked = false;
+    
+    likeButton.addEventListener('click', () => {
+        isLiked = !isLiked;
+        likeButton.textContent = isLiked ? '❤️' : '🤍';
+        likeCount.textContent = isLiked ? '1,235 likes' : '1,234 likes';
+    });
+
+    // Close on image click with reverse animation
+    imageContainer.addEventListener('click', () => {
+        const currentTile = gridWrapper.querySelector(`[data-x="${x}"][data-y="${y}"]`);
+        const currentTileRect = currentTile.getBoundingClientRect();
+        const finalScale = currentTileRect.width / 1600;
+
+        // Reset the absolute positioning and dimensions for the closing animation
+        fullscreenImage.style.position = 'absolute';
+        fullscreenImage.style.width = '1600px';
+        fullscreenImage.style.height = '1600px';
+        
+        sidebar.classList.remove('visible');
+        fullscreenContainer.style.backgroundColor = 'rgba(0,0,0,0)';
+        fullscreenImage.style.transform = `
+            translate(${currentTileRect.left}px, ${currentTileRect.top}px) 
+            scale(${finalScale})
+        `;
+
+        setTimeout(() => {
+            document.body.removeChild(fullscreenContainer);
+        }, 300);
+    });
+}
+
+// Add touch handlers for hover effect
+container.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        const element = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (element && element.classList.contains('grid-tile')) {
+            const x = parseInt(element.dataset.x);
+            const y = parseInt(element.dataset.y);
+            hoveredTile = { x, y };
+            element.style.transform = 'scale(1.2)';
+            element.style.zIndex = '1';
+            element.style.filter = 'drop-shadow(0 5px 15px rgba(0,0,0,0.3))';
+        }
+    }
+    e.preventDefault();
+}, { passive: false });
+
+container.addEventListener('touchend', (e) => {
+    if (!wasTouching && hoveredTile) {
+        const element = gridWrapper.querySelector(`[data-x="${hoveredTile.x}"][data-y="${hoveredTile.y}"]`);
+        if (element) {
+            element.style.transform = 'scale(1)';
+            element.style.zIndex = '0';
+            element.style.filter = 'none';
+        }
+    }
+    if (e.touches.length === 0) {
+        hoveredTile = null;
+    }
+});
+
+// Prevent default touch behaviors
+container.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+container.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+// Create reset button with center icon
+const resetButton = document.createElement('button');
+resetButton.id = 'resetButton';
+resetButton.innerHTML = `
+<?xml version="1.0" encoding="utf-8"?><svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" width="122.88px" height="122.88px" viewBox="0 0 122.88 122.88" enable-background="new 0 0 122.88 122.88" xml:space="preserve"><g><path fill-rule="evenodd" clip-rule="evenodd" d="M61.438,0c33.938,0,61.442,27.509,61.442,61.442S95.375,122.88,61.438,122.88 C27.509,122.88,0,95.376,0,61.442S27.509,0,61.438,0L61.438,0z M61.442,43.027c10.17,0,18.413,8.245,18.413,18.416 c0,10.17-8.243,18.413-18.413,18.413c-10.171,0-18.416-8.243-18.416-18.413C43.026,51.272,51.271,43.027,61.442,43.027 L61.442,43.027z M61.438,18.389c23.778,0,43.054,19.279,43.054,43.054s-19.275,43.049-43.054,43.049 c-23.77,0-43.049-19.274-43.049-43.049S37.668,18.389,61.438,18.389L61.438,18.389z"/></g></svg>
+    Go to center
+`;
+document.body.appendChild(resetButton);
+
+// Function to check if view is centered
+function isViewCentered() {
+    const targetOffsetX = window.innerWidth / 2 - tileWidth / 2;
+    const targetOffsetY = window.innerHeight / 2 - tileHeight / 2;
+    const targetScale = 1;
+
+    // Calculate percentage offset from center (10% of screen dimensions)
+    const toleranceX = window.innerWidth * 0.40;
+    const toleranceY = window.innerHeight * 0.40;
+    const toleranceScale = 0.3; // 30% scale difference
+    
+    return Math.abs(offsetX - targetOffsetX) < toleranceX &&
+           Math.abs(offsetY - targetOffsetY) < toleranceY &&
+           Math.abs(scale - targetScale) < toleranceScale;
+}
+
+// Function to update button visibility
+function updateButtonVisibility() {
+    if (isViewCentered()) {
+        resetButton.classList.remove('visible');
+    } else {
+        resetButton.classList.add('visible');
+    }
+}
+
+// Reset button functionality
+resetButton.addEventListener('click', () => {
+    const targetOffsetX = window.innerWidth / 2 - tileWidth / 2;
+    const targetOffsetY = window.innerHeight / 2 - tileHeight / 2;
+    const targetScale = 1;
+
+    // Store starting positions
+    const startOffsetX = offsetX;
+    const startOffsetY = offsetY;
+    const startScale = scale;
+
+    // Animation settings
+    const duration = 250;
+    const startTime = performance.now();
+
+    function animate(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+        // Interpolate values
+        offsetX = startOffsetX + (targetOffsetX - startOffsetX) * easeProgress;
+        offsetY = startOffsetY + (targetOffsetY - startOffsetY) * easeProgress;
+        scale = startScale + (targetScale - startScale) * easeProgress;
+
+        // Update the grid
+        updateVisibleTiles();
+
+        if (progress < 1) {
+            requestAnimationFrame(animate);
+        }
+    }
+
+    requestAnimationFrame(animate);
+});
+
+// Initial button visibility check
+updateButtonVisibility();
+
+// Mouse wheel zoom
+container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    
+    const rect = container.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const gridX = (mouseX - offsetX) / scale;
+    const gridY = (mouseY - offsetY) / scale;
+
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.min(Math.max(scale * delta, minZoom), maxZoom);
+    
+    // Only proceed if the new scale is within bounds
+    if (newScale !== scale && newScale >= minZoom && newScale <= maxZoom) {
+        // Check if we're crossing the resolution threshold
+        const wasAboveThreshold = scale > 1.5;
+        const isAboveThreshold = newScale > 1.5;
+        
+        scale = newScale;
+        
+        offsetX = mouseX - gridX * scale;
+        offsetY = mouseY - gridY * scale;
+        
+        updateGridTransform();
+        
+        // If we crossed the threshold, force resolution update for all visible tiles
+        if (wasAboveThreshold !== isAboveThreshold) {
+            const visibleTileElements = gridWrapper.querySelectorAll('.grid-tile');
+            visibleTileElements.forEach(tile => {
+                const x = parseInt(tile.dataset.x);
+                const y = parseInt(tile.dataset.y);
+                loadImage(tile, x, y, isAboveThreshold);
+            });
+        }
+        
+        updateVisibleTiles();
+    }
+});
+
+// Function to center the viewport
+function centerViewport() {
+    // Calculate center position
+    offsetX = window.innerWidth / 2 - tileWidth / 2;
+    offsetY = window.innerHeight / 2 - tileHeight / 2;
+    scale = 1;
+    
+    // Update the transform
+    gridWrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+    
+    // Update visible tiles
+    updateVisibleTiles();
+}
+
+// Call centerViewport immediately after creating the grid
+centerViewport();
+
+// Also handle window resize
+window.addEventListener('resize', centerViewport);
+
+// Add load event listener as backup
+window.addEventListener('load', centerViewport);
+
+// Add the updateGridTransform function
+function updateGridTransform() {
+    // Ensure scale is within bounds before applying transform
+    const boundedScale = Math.min(Math.max(scale, minZoom), maxZoom);
+    gridWrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${boundedScale})`;
+}
+
+// Initialize grid with proper bounds
+scale = Math.min(Math.max(scale, minZoom), maxZoom);
+container.style.cursor = 'grab';
+updateGridTransform();
+updateVisibleTiles();
