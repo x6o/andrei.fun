@@ -392,28 +392,39 @@ function createTile(x, y) {
     const xPos = x * horizontalOffset + (y % 2 ? horizontalOffset/2 : 0);
     const yPos = y * verticalOffset;
 
+    // Remove transition property for mobile
+    const transitionStyle = isMobileDevice() ? '' : 'transition: transform 0.2s ease, filter 0.2s ease;';
+
     tile.style.cssText = `
         position: absolute;
         width: ${tileWidth}px;
         height: ${tileWidth}px;
         left: ${xPos}px;
         top: ${yPos}px;
-        transition: transform 0.2s ease, filter 0.2s ease;
+        ${transitionStyle}
     `;
 
-    tile.addEventListener('mouseenter', () => {
-        hoveredTile = { x, y };
-        tile.style.transform = 'scale(1.2)';
-        tile.style.zIndex = '1';
-        tile.style.filter = 'drop-shadow(0 0 20px rgba(255, 255, 255, 0.8))';
-    });
+    // Only add hover effects for non-mobile devices
+    if (!isMobileDevice()) {
+        tile.addEventListener('mouseenter', () => {
+            hoveredTile = { x, y };
+            tile.style.transform = 'scale(1.2)';
+            tile.style.zIndex = '1';
+            tile.style.filter = 'drop-shadow(0 0 20px rgba(255, 255, 255, 0.8))';
+        });
 
-    tile.addEventListener('mouseleave', () => {
-        hoveredTile = null;
-        tile.style.transform = 'scale(1)';
-        tile.style.zIndex = '0';
+        tile.addEventListener('mouseleave', () => {
+            hoveredTile = null;
+            tile.style.transform = 'scale(1)';
+            tile.style.zIndex = '0';
+            tile.style.filter = 'none';
+        });
+    } else {
+        // For mobile, explicitly remove any hover-related properties
+        tile.style.transform = 'none';
         tile.style.filter = 'none';
-    });
+        tile.style.pointerEvents = 'none';
+    }
 
     // Immediately load the low-res image
     loadImage(tile, x, y, false);
@@ -1046,3 +1057,34 @@ scale = Math.min(Math.max(scale, minZoom), maxZoom);
 container.style.cursor = 'grab';
 updateGridTransform();
 updateVisibleTiles();
+
+// Add this function near the top with other initialization code
+function addMobileStylesheet() {
+    if (isMobileDevice()) {
+        const style = document.createElement('style');
+        style.textContent = `
+            @media (hover: none) {
+                .grid-tile {
+                    transform: none !important;
+                    filter: none !important;
+                    transition: none !important;
+                    pointer-events: none !important;
+                }
+                .grid-tile:hover,
+                .grid-tile:active,
+                .grid-tile:focus {
+                    transform: none !important;
+                    filter: none !important;
+                    z-index: 0 !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+}
+
+// Call this function during initialization
+document.addEventListener('DOMContentLoaded', () => {
+    addMobileStylesheet();
+    // ... rest of your initialization code ...
+});
