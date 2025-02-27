@@ -420,10 +420,8 @@ function createTile(x, y) {
 
 // Update image loading function for tiles
 function loadImage(tile, x, y, forceHighRes = false) {
-    // Skip if tile is already loading this resolution
-    const shouldLoadHighRes = forceHighRes || scale > 1.5;
-    const currentRes = tile.dataset.highRes === 'true';
-    if (shouldLoadHighRes === currentRes && tile.style.backgroundImage) {
+    // Skip if tile already has an image and we're not forcing a resolution change
+    if (tile.style.backgroundImage && !forceHighRes) {
         return;
     }
 
@@ -436,6 +434,7 @@ function loadImage(tile, x, y, forceHighRes = false) {
 
     // Create new image
     const img = new Image();
+    const shouldLoadHighRes = forceHighRes || scale > 1.5;
     const imgSrc = shouldLoadHighRes 
         ? `https://picsum.photos/seed/${x}_${y}/1600/1600.jpg`
         : `https://picsum.photos/seed/${x}_${y}/160/160.jpg`;
