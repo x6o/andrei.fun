@@ -421,8 +421,14 @@ function createTile(x, y) {
     return tile;
 }
 
+function isMobileDevice() {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
 function loadImage(tile, x, y, forceHighRes = false) {
-    const shouldLoadHighRes = forceHighRes || scale > 1.5;
+    // Force high-res on mobile devices during initial load if tile has no image
+    const isInitialMobileLoad = isMobileDevice() && !tile.style.backgroundImage;
+    const shouldLoadHighRes = forceHighRes || scale > 1.5 || isInitialMobileLoad;
     
     // Skip if already loaded at the correct resolution
     if (tile.dataset.highRes === shouldLoadHighRes.toString() && tile.style.backgroundImage) {
