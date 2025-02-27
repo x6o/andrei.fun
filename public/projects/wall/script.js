@@ -496,18 +496,19 @@ function updateVisibleTiles() {
                     gridWrapper.appendChild(tile);
                     visibleTiles.add(key);
                     
-                    // Calculate distance from center for loading priority
-                    const dx = x - centerX;
-                    const dy = y - centerY;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
-                    
-                    tilesToLoad.push({ tile, x, y, distance });
+                    // Force immediate load of low-res image
+                    loadImage(tile, x, y, false);
                 }
             } else {
                 // Check existing tiles for resolution update if needed
                 const tile = gridWrapper.querySelector(`[data-x="${x}"][data-y="${y}"]`);
-                if (tile && scale > 1.5 && tile.dataset.highRes === 'false') {
-                    loadImage(tile, x, y, true);
+                if (tile) {
+                    if (scale > 1.5 && tile.dataset.highRes === 'false') {
+                        loadImage(tile, x, y, true);
+                    } else if (!tile.style.backgroundImage) {
+                        // Force load if tile has no image
+                        loadImage(tile, x, y, false);
+                    }
                 }
             }
         }
@@ -525,18 +526,8 @@ function updateVisibleTiles() {
         }
     }
 
-    // Update grid wrapper transform only - center area will transform with it
+    // Update grid wrapper transform
     gridWrapper.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
-
-    // Sort tiles by distance from center before loading
-    tilesToLoad.sort((a, b) => a.distance - b.distance);
-
-    // Load images in the background, starting from center
-    requestIdleCallback(() => {
-        tilesToLoad.forEach(({ tile, x, y }) => {
-            loadImage(tile, x, y);
-        });
-    }, { timeout: 1000 });
 
     // Update button visibility
     updateButtonVisibility();
